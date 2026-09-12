@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>拋印 - 登入</title>
+<link rel="icon" type="image/png" href="/icon.png" />
+<link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div class="login-wrap">
+    <div class="login-card">
+      <div class="login-mark">
+        <img src="/icon.png" alt="拋印" />
+      </div>
+      <h1>拋印</h1>
+      <p>輸入帳號密碼以繼續</p>
+      <form id="loginForm">
+        <div class="field">
+          <label for="username">帳號</label>
+          <input type="text" id="username" autocomplete="username" autofocus />
+        </div>
+        <div class="field">
+          <label for="password">密碼</label>
+          <input type="password" id="password" autocomplete="current-password" />
+        </div>
+        <button type="submit" class="primary">登入</button>
+        <div id="msg" class="msg error"></div>
+      </form>
+    </div>
+  </div>
+  <script src="/login.js"></script>
+</body>
+</html>

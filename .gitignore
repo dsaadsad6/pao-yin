@@ -1,0 +1,14 @@
+node_modules/
+.env
+uploads/*
+converted/*
+print-ready/*
+data/jobs.json
+data/printer-stats.json
+.lo-profile/
+!uploads/.gitkeep
+!converted/.gitkeep
+!print-ready/.gitkeep
+startup-logs/
+cf-proxy-worker/node_modules/
+cf-proxy-worker/.wrangler/

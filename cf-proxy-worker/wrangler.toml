@@ -1,0 +1,10 @@
+﻿name = "remote-print-proxy"
+main = "src/index.js"
+compatibility_date = "2024-01-01"
+
+routes = [
+  { pattern = "print.xiaom67.dpdns.org", custom_domain = true }
+]
+
+[vars]
+ORIGIN_URL = "https://supply-ftp-image-principle.trycloudflare.com"
