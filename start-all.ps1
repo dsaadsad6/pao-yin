@@ -1,4 +1,4 @@
-# 開機/登入時自動執行:啟動伺服器 + Quick Tunnel,並自動把新網址同步到 Cloudflare Worker
+﻿# 開機/登入時自動執行:啟動伺服器 + Quick Tunnel,並自動把新網址同步到 Cloudflare Worker
 $ErrorActionPreference = "Stop"
 $root = "E:\Projects\remote-print"
 $logDir = "$root\startup-logs"

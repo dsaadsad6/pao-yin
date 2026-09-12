@@ -1,0 +1,15 @@
+{
+  "name": "拋印",
+  "short_name": "拋印",
+  "description": "照片、PDF、Word、文字、網頁,通通拋去印表機",
+  "start_url": "/print/",
+  "scope": "/print/",
+  "display": "standalone",
+  "background_color": "#050506",
+  "theme_color": "#050506",
+  "orientation": "portrait-primary",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

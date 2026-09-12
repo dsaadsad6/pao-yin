@@ -2,6 +2,11 @@ import { renderPageGrid } from './pdf-viewer.js';
 import { createCustomSelect } from './custom-select.js';
 import { applyI18n, LANGS } from './i18n.js';
 
+// 註冊 Service Worker,讓瀏覽器可以把這個工具「加到主畫面/安裝成應用程式」
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
+
 const STORAGE_KEY = 'remote-print-prefs';
 
 const state = {
@@ -304,7 +309,14 @@ sourceTabs.querySelectorAll('button').forEach((btn) => {
     sourceTabs.querySelectorAll('button').forEach((b) => b.classList.remove('active'));
     btn.classList.add('active');
     for (const [key, panel] of Object.entries(SOURCE_PANELS)) {
-      panel.style.display = key === btn.dataset.value ? 'block' : 'none';
+      if (key === btn.dataset.value) {
+        panel.style.display = 'block';
+        panel.classList.remove('tab-anim');
+        void panel.offsetWidth; // 強制 reflow,讓動畫可以重新播放
+        panel.classList.add('tab-anim');
+      } else {
+        panel.style.display = 'none';
+      }
     }
   });
 });
