@@ -30,7 +30,20 @@
           <option value="zh">中文</option>
           <option value="en">English</option>
           <option value="ja">日本語</option>
+          <option value="vi">Tiếng Việt</option>
+          <option value="id">Bahasa Indonesia</option>
         </select>
+        <button type="button" class="icon-btn" id="qrBtn" data-i18n-title="qrTitle" title="快速開啟(QR Code)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="7" height="7"></rect>
+            <rect x="14" y="3" width="7" height="7"></rect>
+            <rect x="3" y="14" width="7" height="7"></rect>
+            <line x1="14" y1="14" x2="14" y2="21"></line>
+            <line x1="21" y1="14" x2="21" y2="21"></line>
+            <line x1="17.5" y1="14" x2="17.5" y2="17.5"></line>
+            <line x1="14" y1="17.5" x2="21" y2="17.5"></line>
+          </svg>
+        </button>
         <button type="button" class="icon-btn" id="themeToggle" title="切換主題">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="12" r="4"></circle>
@@ -38,6 +51,9 @@
           </svg>
         </button>
         <a href="#" class="logout" id="logoutBtn" data-i18n="logout">登出</a>
+      </div>
+      <div class="qr-popover" id="qrPopover" style="display:none;">
+        <img id="qrImage" alt="QR Code" width="200" height="200" />
       </div>
     </header>
 
@@ -64,6 +80,8 @@
           <div class="hint" data-i18n="dropHint">支援 JPG / PNG / PDF / DOC(X) / PPT(X) / XLS(X) / TXT / MD,單檔最大 100MB</div>
         </div>
         <input type="file" id="fileInput" multiple accept=".jpg,.jpeg,.png,.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.md" />
+        <input type="file" id="cameraInput" accept="image/*" capture="environment" style="display:none;" />
+        <button type="button" class="secondary" id="cameraBtn" style="margin-top:10px;" data-i18n="cameraBtn">📷 拍照上傳</button>
 
         <label class="checkbox-line" style="margin-top:12px;">
           <input type="checkbox" id="autoFix" checked />
@@ -71,7 +89,11 @@
         </label>
 
         <div id="pendingList" class="pending-list" style="display:none;"></div>
-        <button type="button" class="secondary" id="mergeBtn" style="display:none; margin-top:10px;" data-i18n="mergeBtn">合併成一份文件並使用</button>
+        <div id="pendingActions" class="pending-actions" style="display:none;">
+          <button type="button" class="secondary" id="mergeBtn" data-i18n="mergeBtn">合併成一份文件並使用</button>
+          <button type="button" class="secondary" id="batchModeBtn" data-i18n="batchModeBtn">分別列印(各自頁碼)</button>
+          <button type="button" class="link-btn" id="exitBatchBtn" style="display:none;" data-i18n="exitBatchMode">取消批次列印</button>
+        </div>
       </div>
 
       <div id="sourceText" style="display:none;">
@@ -128,7 +150,7 @@
         <button type="button" class="link-btn" id="testPageBtn" data-i18n="printTestPage">列印測試頁</button>
       </div>
 
-      <div class="field">
+      <div class="field" id="pageRangeField">
         <label data-i18n="pageRange">頁碼範圍</label>
         <label class="checkbox-line">
           <input type="checkbox" id="allPages" checked />
@@ -162,7 +184,7 @@
         </div>
       </div>
 
-      <div class="row2">
+      <div class="row2" id="layoutRow">
         <div class="field">
           <label data-i18n="layout">版面</label>
           <select id="layoutMode">
@@ -183,6 +205,10 @@
             <option value="3x2">3 x 2(6 張紙)</option>
           </select>
         </div>
+        <div class="field" id="scaleField">
+          <label data-i18n="scaleLabel">縮放比例</label>
+          <input type="number" id="pageScale" value="100" min="50" max="200" step="5" />
+        </div>
       </div>
 
       <div class="field">
@@ -193,8 +219,28 @@
       <details class="advanced">
         <summary data-i18n="advancedOptions">進階列印選項</summary>
         <div class="field">
+          <label data-i18n="watermarkPresetLabel">浮水印樣式</label>
+          <select id="watermarkPreset">
+            <option value="custom" data-i18n="presetCustom">自訂</option>
+            <option value="confidential" data-i18n="presetConfidential">機密</option>
+            <option value="draft" data-i18n="presetDraft">草稿</option>
+            <option value="internal" data-i18n="presetInternal">僅供內部使用</option>
+          </select>
+        </div>
+        <div class="field">
           <label data-i18n="watermarkLabel">浮水印文字(留空 = 不加)</label>
           <input type="text" id="watermarkText" data-i18n-placeholder="watermarkPlaceholder" placeholder="例如:機密" />
+        </div>
+        <div class="field">
+          <label data-i18n="watermarkImageLabel">浮水印圖片(選填,PNG/JPG)</label>
+          <input type="file" id="watermarkImageInput" accept=".png,.jpg,.jpeg" style="display:none;" />
+          <button type="button" class="secondary" id="watermarkImagePickBtn" data-i18n="chooseImageBtn">選擇圖片</button>
+          <div class="hint" id="watermarkImageHint"></div>
+        </div>
+        <div class="field">
+          <label data-i18n="signatureLabel">簽名蓋章(選填)</label>
+          <button type="button" class="secondary" id="openSignatureBtn" data-i18n="signatureBtn">✍️ 加入簽名</button>
+          <div class="hint" id="signatureStatusHint"></div>
         </div>
         <div class="row2">
           <div class="field">
@@ -212,10 +258,24 @@
         </label>
       </details>
 
+      <div class="field" id="scheduleField">
+        <label class="checkbox-line">
+          <input type="checkbox" id="scheduleEnabled" />
+          <span data-i18n="scheduleEnabled">排程列印(選擇未來時間自動送印)</span>
+        </label>
+        <input type="datetime-local" id="scheduleAt" style="display:none; margin-top:8px;" />
+      </div>
+
       <div class="field">
+        <button class="secondary" id="previewBtn" data-i18n="previewBtn">預覽</button>
         <button class="primary" id="printBtn" data-i18n="printBtn">送出列印</button>
         <div class="msg" id="printMsg"></div>
       </div>
+    </section>
+
+    <section class="panel" id="scheduledPanel" style="display:none;">
+      <h2 data-i18n="scheduledJobs">排程中的列印</h2>
+      <div class="table-scroll" id="scheduledWrap"></div>
     </section>
 
     <section class="panel">
@@ -233,6 +293,64 @@
     </section>
 
     <div class="footer-note" data-i18n="footerNote">遠端影印 · 僅供個人使用</div>
+  </div>
+
+  <button type="button" class="feedback-fab" id="feedbackFab" data-i18n="feedbackBtn" data-i18n-title="feedbackBtn" title="意見回饋">意見回饋</button>
+
+  <div class="modal-overlay" id="passwordModal" style="display:none;">
+    <div class="modal-card">
+      <h3 data-i18n="passwordModalTitle">這份 PDF 有密碼保護</h3>
+      <input type="password" id="pdfPasswordInput" class="pdf-password-input" data-i18n-placeholder="passwordPlaceholder" placeholder="請輸入密碼" />
+      <div class="msg" id="pdfPasswordMsg"></div>
+      <div class="modal-actions">
+        <button type="button" class="secondary" id="pdfPasswordCancelBtn" data-i18n="feedbackCancel">取消</button>
+        <button type="button" class="primary" id="pdfPasswordSubmitBtn" data-i18n="unlockBtn">解鎖</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="signatureModal" style="display:none;">
+    <div class="modal-card signature-card">
+      <h3 data-i18n="signatureModalTitle">簽名</h3>
+      <canvas id="signatureCanvas" class="signature-canvas" width="500" height="220"></canvas>
+      <div class="hint" data-i18n="signatureHint">用滑鼠或手指在上面簽名</div>
+      <div class="field">
+        <label data-i18n="signaturePlacementLabel">蓋章位置</label>
+        <select id="signaturePlacement">
+          <option value="stamp-last-page" data-i18n="signatureLastPage">僅最後一頁</option>
+          <option value="stamp-all-pages" data-i18n="signatureAllPages">每一頁</option>
+        </select>
+      </div>
+      <div class="msg" id="signatureMsg"></div>
+      <div class="modal-actions">
+        <button type="button" class="secondary" id="signatureClearBtn" data-i18n="signatureClear">清除重簽</button>
+        <button type="button" class="secondary" id="signatureCancelBtn" data-i18n="feedbackCancel">取消</button>
+        <button type="button" class="primary" id="signatureConfirmBtn" data-i18n="signatureConfirm">確認簽名</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="previewModal" style="display:none;">
+    <div class="modal-card preview-card">
+      <h3 data-i18n="previewModalTitle">列印預覽</h3>
+      <iframe id="previewFrame" class="preview-frame"></iframe>
+      <div class="msg" id="previewMsg"></div>
+      <div class="modal-actions">
+        <button type="button" class="secondary" id="previewCloseBtn" data-i18n="previewClose">關閉</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="feedbackModal" style="display:none;">
+    <div class="modal-card">
+      <h3 data-i18n="feedbackModalTitle">意見回饋</h3>
+      <textarea id="feedbackText" class="paste-text" rows="5" data-i18n-placeholder="feedbackPlaceholder" placeholder="想到什麼都可以跟我們說…"></textarea>
+      <div class="msg" id="feedbackMsg"></div>
+      <div class="modal-actions">
+        <button type="button" class="secondary" id="feedbackCancelBtn" data-i18n="feedbackCancel">取消</button>
+        <button type="button" class="primary" id="feedbackSubmitBtn" data-i18n="feedbackSubmit">送出</button>
+      </div>
+    </div>
   </div>
 
   <script type="module" src="/app.js"></script>

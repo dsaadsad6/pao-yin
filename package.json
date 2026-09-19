@@ -1,6 +1,6 @@
 {
   "name": "remote-print",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "description": "拋印 - 自用遠端影印網站,上傳照片/PDF/Word,選頁數、彩色黑白、雙面,直接送印表機",
   "main": "server.js",
   "scripts": {
@@ -13,10 +13,13 @@
     "express-rate-limit": "^7.4.0",
     "express-session": "^1.18.0",
     "file-type": "^22.1.0",
+    "geoip-lite": "^2.0.3",
     "marked": "^4.3.0",
     "multer": "^2.0.0",
+    "node-cron": "^4.6.0",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^4.7.76",
+    "qrcode": "^1.5.4",
     "sharp": "^0.35.4"
   }
 }

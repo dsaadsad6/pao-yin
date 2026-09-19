@@ -152,6 +152,7 @@ select, input[type="text"], input[type="number"], input[type="password"], .paste
 
 /* ---- header ---- */
 header {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -616,6 +617,8 @@ details.advanced .field:last-of-type { margin-bottom: 14px; }
 }
 .pending-item button:hover { border-color: var(--accent); color: var(--accent); }
 .pending-item button:disabled { opacity: .3; cursor: not-allowed; }
+.pending-item input[type="text"] { width: 110px; flex-shrink: 0; }
+.pending-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
 /* ---- 頁面縮圖網格 ---- */
 .page-grid {
@@ -690,6 +693,29 @@ details.advanced .field:last-of-type { margin-bottom: 14px; }
 }
 .pg-check svg { width: 11px; height: 11px; }
 .pg-card.pg-selected .pg-check { opacity: 1; }
+
+.pg-card canvas { transition: transform .2s var(--ease); }
+.pg-rotate {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--panel-3);
+  border: 1px solid var(--line);
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+  opacity: .55;
+  transition: opacity .15s var(--ease), border-color .15s var(--ease);
+}
+.pg-rotate svg { width: 11px; height: 11px; }
+.pg-card:hover .pg-rotate { opacity: 1; }
+.pg-rotate:hover { border-color: var(--accent); color: var(--accent); }
 
 button.primary {
   width: 100%;
@@ -868,4 +894,92 @@ td.status-printing { color: var(--text-dim); }
 
 @media (min-width: 641px) and (max-width: 900px) {
   .feature-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ---- QR Code popover ---- */
+.qr-popover {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 30;
+  background: var(--panel-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  backdrop-filter: var(--blur);
+  padding: 14px;
+}
+.qr-popover img { display: block; width: 200px; height: 200px; border-radius: 8px; background: #fff; }
+
+/* ---- 意見回饋 ---- */
+.feedback-fab {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 40;
+  background: var(--panel-3);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 12px 18px;
+  font-size: 13px;
+  cursor: pointer;
+  box-shadow: var(--shadow);
+  backdrop-filter: var(--blur);
+  transition: transform .15s var(--ease), border-color .15s var(--ease);
+}
+.feedback-fab:hover { border-color: var(--accent); transform: translateY(-2px); }
+.feedback-fab:active { transform: scale(.95); }
+
+/* ---- 通用 modal ---- */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(0,0,0,.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.modal-card {
+  width: 100%;
+  max-width: 420px;
+  background: var(--panel-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 22px;
+}
+.modal-card h3 { margin: 0 0 14px; font-size: 16px; }
+.modal-card textarea {
+  width: 100%;
+  min-height: 110px;
+  resize: vertical;
+}
+.modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 14px; }
+.preview-card { max-width: 720px; }
+.preview-frame {
+  width: 100%;
+  height: 70vh;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fff;
+}
+.pdf-password-input { width: 100%; }
+.signature-card { max-width: 560px; }
+.signature-canvas {
+  width: 100%;
+  height: 220px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  touch-action: none;
+  cursor: crosshair;
+  margin-bottom: 8px;
+}
+
+@media (max-width: 640px) {
+  .qr-popover { right: -8px; }
+  .feedback-fab { right: 14px; bottom: 14px; padding: 10px 14px; }
 }

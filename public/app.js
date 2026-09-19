@@ -22,16 +22,28 @@ let pendingFiles = []; // 多檔上傳、尚未合併/採用前的暫存清單
 let pageGridController = null;
 let customOrderActive = false;
 let customOrderPages = null;
+let batchModeActive = false;
 
 const dropzone = document.getElementById('dropzone');
 const fileInput = document.getElementById('fileInput');
+const cameraInput = document.getElementById('cameraInput');
+const cameraBtn = document.getElementById('cameraBtn');
 const fileInfo = document.getElementById('fileInfo');
 const fileName = document.getElementById('fileName');
 const fileMeta = document.getElementById('fileMeta');
 const clearFile = document.getElementById('clearFile');
 const autoFixCheckbox = document.getElementById('autoFix');
 const pendingList = document.getElementById('pendingList');
+const pendingActions = document.getElementById('pendingActions');
 const mergeBtn = document.getElementById('mergeBtn');
+const batchModeBtn = document.getElementById('batchModeBtn');
+const exitBatchBtn = document.getElementById('exitBatchBtn');
+const pageRangeField = document.getElementById('pageRangeField');
+const layoutRow = document.getElementById('layoutRow');
+const scheduleEnabled = document.getElementById('scheduleEnabled');
+const scheduleAt = document.getElementById('scheduleAt');
+const scheduledPanel = document.getElementById('scheduledPanel');
+const scheduledWrap = document.getElementById('scheduledWrap');
 const pageGrid = document.getElementById('pageGrid');
 const pageGridActions = document.getElementById('pageGridActions');
 const resetOrderBtn = document.getElementById('resetOrderBtn');
@@ -62,9 +74,20 @@ const layoutHint = document.getElementById('layoutHint');
 const posterSizeField = document.getElementById('posterSizeField');
 const posterSize = document.getElementById('posterSize');
 const watermarkText = document.getElementById('watermarkText');
+const watermarkPreset = document.getElementById('watermarkPreset');
+const watermarkImageInput = document.getElementById('watermarkImageInput');
+const watermarkImagePickBtn = document.getElementById('watermarkImagePickBtn');
+const watermarkImageHint = document.getElementById('watermarkImageHint');
+const pageScale = document.getElementById('pageScale');
+const scaleField = document.getElementById('scaleField');
 const headerText = document.getElementById('headerText');
 const footerText = document.getElementById('footerText');
 const pageNumbers = document.getElementById('pageNumbers');
+const previewBtn = document.getElementById('previewBtn');
+const previewModal = document.getElementById('previewModal');
+const previewFrame = document.getElementById('previewFrame');
+const previewMsg = document.getElementById('previewMsg');
+const previewCloseBtn = document.getElementById('previewCloseBtn');
 const printBtn = document.getElementById('printBtn');
 const printMsg = document.getElementById('printMsg');
 const jobsWrap = document.getElementById('jobsWrap');
@@ -73,12 +96,36 @@ const jobStatusFilter = document.getElementById('jobStatusFilter');
 const langSelect = document.getElementById('langSelect');
 const themeToggle = document.getElementById('themeToggle');
 const maintenanceHint = document.getElementById('maintenanceHint');
+const qrBtn = document.getElementById('qrBtn');
+const qrPopover = document.getElementById('qrPopover');
+const qrImage = document.getElementById('qrImage');
+const feedbackFab = document.getElementById('feedbackFab');
+const feedbackModal = document.getElementById('feedbackModal');
+const feedbackText = document.getElementById('feedbackText');
+const feedbackMsg = document.getElementById('feedbackMsg');
+const feedbackCancelBtn = document.getElementById('feedbackCancelBtn');
+const feedbackSubmitBtn = document.getElementById('feedbackSubmitBtn');
+const openSignatureBtn = document.getElementById('openSignatureBtn');
+const signatureStatusHint = document.getElementById('signatureStatusHint');
+const signatureModal = document.getElementById('signatureModal');
+const signatureCanvas = document.getElementById('signatureCanvas');
+const signaturePlacement = document.getElementById('signaturePlacement');
+const signatureMsg = document.getElementById('signatureMsg');
+const signatureClearBtn = document.getElementById('signatureClearBtn');
+const signatureCancelBtn = document.getElementById('signatureCancelBtn');
+const signatureConfirmBtn = document.getElementById('signatureConfirmBtn');
+const passwordModal = document.getElementById('passwordModal');
+const pdfPasswordInput = document.getElementById('pdfPasswordInput');
+const pdfPasswordMsg = document.getElementById('pdfPasswordMsg');
+const pdfPasswordCancelBtn = document.getElementById('pdfPasswordCancelBtn');
+const pdfPasswordSubmitBtn = document.getElementById('pdfPasswordSubmitBtn');
 
 const printerDropdown = createCustomSelect(printerSelect);
 const layoutDropdown = createCustomSelect(layoutModeSelect);
 const posterDropdown = createCustomSelect(posterSize);
 const jobStatusDropdown = createCustomSelect(jobStatusFilter);
 const langDropdown = createCustomSelect(langSelect);
+const watermarkPresetDropdown = createCustomSelect(watermarkPreset);
 
 document.getElementById('logoutBtn').addEventListener('click', async (e) => {
   e.preventDefault();
@@ -101,22 +148,38 @@ langSelect.addEventListener('change', () => {
   layoutDropdown.refresh();
   posterDropdown.refresh();
   jobStatusDropdown.refresh();
+  watermarkPresetDropdown.refresh();
   renderJobs();
+  themeToggle.title = themeTooltip(currentTheme);
+  if (batchModeActive) printBtn.textContent = t('batchSubmitBtn');
+  else if (scheduleEnabled.checked) printBtn.textContent = t('scheduleSubmitBtn');
+  else printBtn.textContent = t('printBtn');
 });
 
-// ---- 主題(深色 / 淺色 / 護眼) ----
-const THEME_CYCLE = ['dark', 'light', 'eyecare'];
+// ---- 主題(深色 / 淺色 / 護眼 / 自動跟隨系統) ----
+const THEME_CYCLE = ['dark', 'light', 'eyecare', 'auto'];
 const THEME_ATTR = { dark: null, light: 'light', eyecare: 'eyecare' };
+const THEME_NAME_KEYS = { dark: 'themeNameDark', light: 'themeNameLight', eyecare: 'themeNameEyecare', auto: 'themeNameAuto' };
 let currentTheme = localStorage.getItem('remote-print-theme') || 'dark';
-const THEME_NAMES = { dark: '深色', light: '淺色', eyecare: '護眼' };
+const darkMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+function resolveAutoTheme() {
+  return darkMediaQuery.matches ? 'dark' : 'light';
+}
+function themeTooltip(theme) {
+  return `${t(THEME_NAME_KEYS[theme])}(點擊切換)`;
+}
 function applyTheme(theme) {
   currentTheme = theme;
-  if (THEME_ATTR[theme]) document.documentElement.dataset.theme = THEME_ATTR[theme];
+  const effective = theme === 'auto' ? resolveAutoTheme() : theme;
+  if (THEME_ATTR[effective]) document.documentElement.dataset.theme = THEME_ATTR[effective];
   else delete document.documentElement.dataset.theme;
   localStorage.setItem('remote-print-theme', theme);
-  themeToggle.title = `目前:${THEME_NAMES[theme]}主題(點擊切換)`;
+  themeToggle.title = themeTooltip(theme);
 }
 applyTheme(currentTheme);
+darkMediaQuery.addEventListener('change', () => {
+  if (currentTheme === 'auto') applyTheme('auto');
+});
 themeToggle.addEventListener('click', () => {
   const next = THEME_CYCLE[(THEME_CYCLE.indexOf(currentTheme) + 1) % THEME_CYCLE.length];
   applyTheme(next);
@@ -139,6 +202,8 @@ function savePrefs() {
       copies: copiesInput.value,
       layoutMode: layoutModeSelect.value,
       posterSize: posterSize.value,
+      pageScale: pageScale.value,
+      watermarkPreset: watermarkPreset.value,
     }));
   } catch {
     // 私密瀏覽模式等情況下 localStorage 可能無法使用,忽略即可
@@ -160,15 +225,35 @@ fileInput.addEventListener('change', () => {
   fileInput.value = '';
 });
 
+cameraBtn.addEventListener('click', () => cameraInput.click());
+cameraInput.addEventListener('change', () => {
+  if (cameraInput.files.length) uploadMultiple([...cameraInput.files]);
+  cameraInput.value = '';
+});
+
 clearFile.addEventListener('click', () => {
   state.fileId = null;
   pendingFiles = [];
+  exitBatchMode();
   renderPendingList();
   fileInfo.style.display = 'none';
   optionsPanel.style.display = 'none';
 });
 
+function setBatchUiVisible(active) {
+  pageRangeField.style.display = active ? 'none' : 'block';
+  layoutRow.style.display = active ? 'none' : 'grid';
+  scaleField.style.display = active ? 'none' : (layoutModeSelect.value === 'none' ? 'block' : 'none');
+  previewBtn.style.display = active ? 'none' : 'inline-block';
+  printBtn.textContent = active ? t('batchSubmitBtn') : t('printBtn');
+}
+function exitBatchMode() {
+  batchModeActive = false;
+  setBatchUiVisible(false);
+}
+
 async function applyFileResult(data) {
+  exitBatchMode();
   state.fileId = data.id;
   state.originalName = data.originalName;
   state.kind = data.kind;
@@ -195,6 +280,7 @@ async function uploadSingleFile(file) {
 }
 
 async function uploadMultiple(files) {
+  exitBatchMode();
   optionsPanel.style.display = 'none';
   fileName.textContent = `上傳中... (0/${files.length})`;
   fileMeta.textContent = '';
@@ -204,7 +290,15 @@ async function uploadMultiple(files) {
   for (let i = 0; i < files.length; i++) {
     fileName.textContent = `上傳中... (${i + 1}/${files.length}) ${files[i].name}`;
     try {
-      const data = await uploadSingleFile(files[i]);
+      let data = await uploadSingleFile(files[i]);
+      if (data.needsPassword) {
+        const unlocked = await promptForPdfPassword(data);
+        if (!unlocked) {
+          errors.push(`${files[i].name}: 已取消解鎖`);
+          continue;
+        }
+        data = unlocked;
+      }
       pendingFiles.push(data);
     } catch (err) {
       errors.push(`${files[i].name}: ${err.message}`);
@@ -232,16 +326,21 @@ function renderPendingList() {
   if (!pendingFiles.length) {
     pendingList.style.display = 'none';
     pendingList.innerHTML = '';
-    mergeBtn.style.display = 'none';
+    pendingActions.style.display = 'none';
     return;
   }
   pendingList.style.display = 'flex';
-  mergeBtn.style.display = 'block';
+  pendingActions.style.display = 'flex';
+  mergeBtn.style.display = batchModeActive ? 'none' : 'inline-block';
+  batchModeBtn.style.display = batchModeActive ? 'none' : 'inline-block';
+  exitBatchBtn.style.display = batchModeActive ? 'inline-block' : 'none';
+
   pendingList.innerHTML = pendingFiles
     .map((f, i) => `
       <div class="pending-item" data-index="${i}">
         <span class="name">${escapeHtml(f.originalName)}</span>
         <span class="meta">${f.pageCount} 頁</span>
+        ${batchModeActive ? `<input type="text" data-action="range" data-i18n-placeholder="batchPageRangePlaceholder" placeholder="${t('batchPageRangePlaceholder')}" value="${escapeHtml(f.pageRange || '')}" />` : ''}
         <button type="button" data-action="up" ${i === 0 ? 'disabled' : ''}>↑</button>
         <button type="button" data-action="down" ${i === pendingFiles.length - 1 ? 'disabled' : ''}>↓</button>
         <button type="button" data-action="remove">✕</button>
@@ -263,8 +362,24 @@ function renderPendingList() {
       pendingFiles.splice(i, 1);
       renderPendingList();
     });
+    const rangeInput = el.querySelector('[data-action="range"]');
+    if (rangeInput) {
+      rangeInput.addEventListener('input', () => { pendingFiles[i].pageRange = rangeInput.value; });
+    }
   });
 }
+
+batchModeBtn.addEventListener('click', () => {
+  if (pendingFiles.length < 2) return;
+  batchModeActive = true;
+  optionsPanel.style.display = 'block';
+  setBatchUiVisible(true);
+  renderPendingList();
+});
+exitBatchBtn.addEventListener('click', () => {
+  exitBatchMode();
+  renderPendingList();
+});
 
 mergeBtn.addEventListener('click', async () => {
   if (pendingFiles.length < 2) return;
@@ -548,6 +663,7 @@ const LAYOUT_HINTS = {
 };
 layoutModeSelect.addEventListener('change', () => {
   posterSizeField.style.display = layoutModeSelect.value === 'poster' ? 'block' : 'none';
+  scaleField.style.display = layoutModeSelect.value === 'none' ? 'block' : 'none';
   layoutHint.textContent = LAYOUT_HINTS[layoutModeSelect.value] || '';
   savePrefs();
 });
@@ -555,10 +671,64 @@ posterSize.addEventListener('change', savePrefs);
 if (prefs.layoutMode) {
   layoutModeSelect.value = prefs.layoutMode;
   posterSizeField.style.display = prefs.layoutMode === 'poster' ? 'block' : 'none';
+  scaleField.style.display = prefs.layoutMode === 'none' ? 'block' : 'none';
   layoutHint.textContent = LAYOUT_HINTS[prefs.layoutMode] || '';
   layoutDropdown.refresh();
 }
 if (prefs.posterSize) { posterSize.value = prefs.posterSize; posterDropdown.refresh(); }
+if (prefs.pageScale) pageScale.value = prefs.pageScale;
+pageScale.addEventListener('change', savePrefs);
+
+// ---- 浮水印樣式庫 ----
+const WATERMARK_PRESETS = {
+  confidential: { textKey: 'presetConfidential', color: [0.75, 0.15, 0.15], opacity: 0.28 },
+  draft: { textKey: 'presetDraft', color: [0.55, 0.55, 0.55], opacity: 0.25 },
+  internal: { textKey: 'presetInternal', color: [0.2, 0.35, 0.6], opacity: 0.22 },
+};
+watermarkPreset.addEventListener('change', () => {
+  const preset = WATERMARK_PRESETS[watermarkPreset.value];
+  if (preset) watermarkText.value = t(preset.textKey);
+  savePrefs();
+});
+if (prefs.watermarkPreset) { watermarkPreset.value = prefs.watermarkPreset; watermarkPresetDropdown.refresh(); }
+
+// ---- 浮水印圖片上傳 ----
+let watermarkImageId = null;
+watermarkImagePickBtn.addEventListener('click', () => watermarkImageInput.click());
+watermarkImageInput.addEventListener('change', async () => {
+  const file = watermarkImageInput.files[0];
+  if (!file) return;
+  watermarkImageId = null;
+  watermarkImageHint.classList.remove('error');
+  watermarkImageHint.textContent = '上傳中...';
+  try {
+    const form = new FormData();
+    form.append('image', file);
+    const res = await fetch('/api/upload-watermark-image', { method: 'POST', body: form });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '上傳失敗');
+    watermarkImageId = data.id;
+    watermarkImageHint.textContent = '';
+    const span = document.createElement('span');
+    span.textContent = `已選擇:${file.name}`;
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'link-btn';
+    removeBtn.style.marginLeft = '8px';
+    removeBtn.textContent = t('remove');
+    removeBtn.addEventListener('click', () => {
+      watermarkImageId = null;
+      watermarkImageInput.value = '';
+      watermarkImageHint.textContent = '';
+    });
+    watermarkImageHint.appendChild(span);
+    watermarkImageHint.appendChild(removeBtn);
+  } catch (err) {
+    watermarkImageId = null;
+    watermarkImageHint.textContent = err.message;
+    watermarkImageHint.classList.add('error');
+  }
+});
 
 // ---- printers ----
 let printersCache = [];
@@ -647,52 +817,174 @@ optionsPanel.addEventListener('keydown', (e) => {
   if (!printBtn.disabled) printBtn.click();
 });
 
-printBtn.addEventListener('click', async () => {
+function buildPrintOptionsPayload() {
+  const preset = WATERMARK_PRESETS[watermarkPreset.value];
+  return {
+    watermarkText: watermarkText.value,
+    headerText: headerText.value,
+    footerText: footerText.value,
+    pageNumbers: pageNumbers.checked,
+    pageOrder: !allPages.checked && customOrderActive ? customOrderPages : null,
+    pageRotations: pageGridController ? pageGridController.getRotations() : {},
+    layoutMode: layoutModeSelect.value,
+    posterCols: Number(posterSize.value.split('x')[0]),
+    posterRows: Number(posterSize.value.split('x')[1]),
+    pageScale: Number(pageScale.value) || 100,
+    watermarkImageId,
+    watermarkColor: preset ? preset.color : null,
+    watermarkOpacity: preset ? preset.opacity : null,
+    stampImageId,
+    stampPlacement: stampPlacementValue,
+  };
+}
+
+previewBtn.addEventListener('click', async () => {
+  if (!state.fileId) return;
+  previewBtn.disabled = true;
+  const original = previewBtn.textContent;
+  previewBtn.textContent = '產生中...';
+  try {
+    const res = await fetch('/api/print-preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: state.fileId,
+        pageRange: allPages.checked ? '' : pageRange.value,
+        ...buildPrintOptionsPayload(),
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '預覽失敗');
+    previewFrame.src = `/api/pdf-bytes/${data.id}`;
+    previewMsg.classList.remove('show', 'error');
+    previewModal.style.display = 'flex';
+  } catch (err) {
+    printMsg.textContent = err.message;
+    printMsg.classList.add('show', 'error');
+  } finally {
+    previewBtn.disabled = false;
+    previewBtn.textContent = original;
+  }
+});
+function closePreviewModal() {
+  previewModal.style.display = 'none';
+  previewFrame.src = '';
+}
+previewCloseBtn.addEventListener('click', closePreviewModal);
+previewModal.addEventListener('click', (e) => { if (e.target === previewModal) closePreviewModal(); });
+
+scheduleEnabled.addEventListener('change', () => {
+  scheduleAt.style.display = scheduleEnabled.checked ? 'block' : 'none';
+  printBtn.textContent = scheduleEnabled.checked ? t('scheduleSubmitBtn') : t('printBtn');
+  previewBtn.style.display = scheduleEnabled.checked ? 'none' : (batchModeActive ? 'none' : 'inline-block');
+});
+
+async function submitBatchPrint() {
+  if (!printerSelect.value) {
+    printMsg.textContent = '請先選擇印表機';
+    printMsg.classList.add('show', 'error');
+    return;
+  }
+  const res = await fetch('/api/print-batch', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      items: pendingFiles.map((f) => ({ id: f.id, pageRange: f.pageRange || '' })),
+      printerName: printerSelect.value,
+      color: state.color,
+      duplex: state.duplex,
+      copies: copiesInput.value,
+      watermarkText: watermarkText.value,
+      headerText: headerText.value,
+      footerText: footerText.value,
+      pageNumbers: pageNumbers.checked,
+    }),
+  });
+  const data = await res.json();
+  if (!res.ok && !data.jobs) throw new Error(data.error || '批次列印失敗');
+  const failedCount = (data.jobs || []).filter((j) => j.status === 'error').length;
+  if (failedCount > 0) throw new Error(`${pendingFiles.length - failedCount}/${pendingFiles.length} 份成功,${failedCount} 份失敗,請查看列印紀錄`);
+  savePrefs();
+  pendingFiles = [];
+  exitBatchMode();
+  renderPendingList();
+  printMsg.textContent = '已送出批次列印工作';
+  printMsg.classList.add('show', 'ok');
+}
+
+async function submitSchedulePrint() {
   if (!state.fileId) return;
   if (!printerSelect.value) {
     printMsg.textContent = '請先選擇印表機';
     printMsg.classList.add('show', 'error');
     return;
   }
+  const res = await fetch('/api/schedule-print', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      id: state.fileId,
+      scheduledAt: scheduleAt.value ? new Date(scheduleAt.value).toISOString() : '',
+      printerName: printerSelect.value,
+      pageRange: allPages.checked ? '' : pageRange.value,
+      color: state.color,
+      duplex: state.duplex,
+      copies: copiesInput.value,
+      ...buildPrintOptionsPayload(),
+    }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || '排程失敗');
+  savePrefs();
+  printMsg.textContent = '已加入排程';
+  printMsg.classList.add('show', 'ok');
+  loadScheduled();
+}
 
+async function submitNormalPrint() {
+  if (!state.fileId) return;
+  if (!printerSelect.value) {
+    printMsg.textContent = '請先選擇印表機';
+    printMsg.classList.add('show', 'error');
+    return;
+  }
+  const res = await fetch('/api/print', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      id: state.fileId,
+      printerName: printerSelect.value,
+      pageRange: allPages.checked ? '' : pageRange.value,
+      color: state.color,
+      duplex: state.duplex,
+      copies: copiesInput.value,
+      ...buildPrintOptionsPayload(),
+    }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || '列印失敗');
+  savePrefs();
+  printMsg.textContent = '已送出列印工作';
+  printMsg.classList.add('show', 'ok');
+  loadJobs();
+}
+
+printBtn.addEventListener('click', async () => {
   printMsg.classList.remove('show', 'error', 'ok');
   printBtn.disabled = true;
-  printBtn.textContent = '列印中...';
+  const original = printBtn.textContent;
+  printBtn.textContent = '處理中...';
 
   try {
-    const res = await fetch('/api/print', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        id: state.fileId,
-        printerName: printerSelect.value,
-        pageRange: allPages.checked ? '' : pageRange.value,
-        color: state.color,
-        duplex: state.duplex,
-        copies: copiesInput.value,
-        watermarkText: watermarkText.value,
-        headerText: headerText.value,
-        footerText: footerText.value,
-        pageNumbers: pageNumbers.checked,
-        pageOrder: !allPages.checked && customOrderActive ? customOrderPages : null,
-        layoutMode: layoutModeSelect.value,
-        posterCols: Number(posterSize.value.split('x')[0]),
-        posterRows: Number(posterSize.value.split('x')[1]),
-      }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || '列印失敗');
-
-    savePrefs();
-    printMsg.textContent = '已送出列印工作';
-    printMsg.classList.add('show', 'ok');
-    loadJobs();
+    if (batchModeActive) await submitBatchPrint();
+    else if (scheduleEnabled.checked) await submitSchedulePrint();
+    else await submitNormalPrint();
   } catch (err) {
     printMsg.textContent = err.message;
     printMsg.classList.add('show', 'error');
   } finally {
     printBtn.disabled = false;
-    printBtn.textContent = '送出列印';
+    printBtn.textContent = original;
   }
 });
 
@@ -752,13 +1044,14 @@ function renderJobs() {
         <td>${escapeHtml(j.pageRange)}</td>
         <td>${colorLabel(j.color)} / ${duplexLabel(j.duplex)}${j.layout ? ' / ' + escapeHtml(j.layout) : ''}</td>
         <td class="status-${j.status}">${statusLabel(j.status)}</td>
+        <td>${escapeHtml(j.printedBy || '-')}</td>
       </tr>`;
     })
     .join('');
   jobsWrap.innerHTML = `<table>
     <thead><tr>
       <th>${t('colTime')}</th><th>${t('colFile')}</th><th>${t('printer')}</th>
-      <th>${t('pageRange')}</th><th>${t('colSettings')}</th><th>${t('colStatus')}</th>
+      <th>${t('pageRange')}</th><th>${t('colSettings')}</th><th>${t('colStatus')}</th><th>${t('colOperator')}</th>
     </tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
@@ -767,11 +1060,259 @@ function renderJobs() {
 jobFilter.addEventListener('input', renderJobs);
 jobStatusFilter.addEventListener('change', renderJobs);
 
+// ---- 排程中的列印 ----
+async function loadScheduled() {
+  try {
+    const res = await fetch('/api/scheduled-jobs');
+    const data = await res.json();
+    renderScheduled(data.scheduled || []);
+  } catch {
+    // 讀取失敗就不顯示這個區塊,不影響其他功能
+  }
+}
+function renderScheduled(list) {
+  if (!list.length) {
+    scheduledPanel.style.display = 'none';
+    return;
+  }
+  scheduledPanel.style.display = 'block';
+  const rows = list
+    .map((s) => {
+      const time = new Date(s.scheduledAt).toLocaleString('zh-TW', { hour12: false });
+      return `<tr>
+        <td>${time}</td>
+        <td>${escapeHtml(s.originalName)}</td>
+        <td>${escapeHtml(s.printerName)}</td>
+        <td><button type="button" class="link-btn" data-cancel="${s.id}">${t('cancelSchedule')}</button></td>
+      </tr>`;
+    })
+    .join('');
+  scheduledWrap.innerHTML = `<table>
+    <thead><tr><th>${t('colTime')}</th><th>${t('colFile')}</th><th>${t('printer')}</th><th></th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+  scheduledWrap.querySelectorAll('[data-cancel]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      try {
+        await fetch(`/api/schedule-print/${btn.dataset.cancel}`, { method: 'DELETE' });
+      } catch {
+        // 忽略,重新整理清單即可反映最新狀態
+      }
+      loadScheduled();
+    });
+  });
+}
+
 function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[c]));
 }
 
+// ---- QR Code 快速開啟 ----
+qrBtn.addEventListener('click', async () => {
+  const isOpen = qrPopover.style.display !== 'none';
+  if (isOpen) { qrPopover.style.display = 'none'; return; }
+  if (!qrImage.src) {
+    try {
+      const res = await fetch('/api/qrcode');
+      if (res.ok) qrImage.src = URL.createObjectURL(await res.blob());
+    } catch {
+      // 抓不到就顯示空白圖示,不影響其他功能
+    }
+  }
+  qrPopover.style.display = 'block';
+});
+document.addEventListener('click', (e) => {
+  if (qrPopover.style.display === 'none') return;
+  if (e.target === qrBtn || qrBtn.contains(e.target) || qrPopover.contains(e.target)) return;
+  qrPopover.style.display = 'none';
+});
+
+// ---- 意見回饋 ----
+function openFeedbackModal() {
+  feedbackMsg.classList.remove('show', 'error', 'ok');
+  feedbackText.value = '';
+  feedbackModal.style.display = 'flex';
+  feedbackText.focus();
+}
+function closeFeedbackModal() {
+  feedbackModal.style.display = 'none';
+}
+feedbackFab.addEventListener('click', openFeedbackModal);
+feedbackCancelBtn.addEventListener('click', closeFeedbackModal);
+feedbackModal.addEventListener('click', (e) => {
+  if (e.target === feedbackModal) closeFeedbackModal();
+});
+feedbackSubmitBtn.addEventListener('click', async () => {
+  const message = feedbackText.value.trim();
+  if (!message) return;
+  feedbackSubmitBtn.disabled = true;
+  try {
+    const res = await fetch('/api/feedback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '送出失敗');
+    feedbackMsg.textContent = t('feedbackSent');
+    feedbackMsg.classList.add('show', 'ok');
+    setTimeout(closeFeedbackModal, 1200);
+  } catch (err) {
+    feedbackMsg.textContent = err.message;
+    feedbackMsg.classList.add('show', 'error');
+  } finally {
+    feedbackSubmitBtn.disabled = false;
+  }
+});
+
+// ---- 簽名蓋章 ----
+let stampImageId = null;
+let stampPlacementValue = 'stamp-last-page';
+const sigCtx = signatureCanvas.getContext('2d');
+sigCtx.lineWidth = 2.5;
+sigCtx.lineCap = 'round';
+sigCtx.strokeStyle = '#111';
+let sigDrawing = false;
+let sigHasStrokes = false;
+
+function sigPos(e) {
+  const rect = signatureCanvas.getBoundingClientRect();
+  const scaleX = signatureCanvas.width / rect.width;
+  const scaleY = signatureCanvas.height / rect.height;
+  return { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY };
+}
+signatureCanvas.addEventListener('pointerdown', (e) => {
+  sigDrawing = true;
+  sigHasStrokes = true;
+  const p = sigPos(e);
+  sigCtx.beginPath();
+  sigCtx.moveTo(p.x, p.y);
+  signatureCanvas.setPointerCapture(e.pointerId);
+});
+signatureCanvas.addEventListener('pointermove', (e) => {
+  if (!sigDrawing) return;
+  const p = sigPos(e);
+  sigCtx.lineTo(p.x, p.y);
+  sigCtx.stroke();
+});
+signatureCanvas.addEventListener('pointerup', () => { sigDrawing = false; });
+signatureCanvas.addEventListener('pointerleave', () => { sigDrawing = false; });
+
+function clearSignatureCanvas() {
+  sigCtx.clearRect(0, 0, signatureCanvas.width, signatureCanvas.height);
+  sigHasStrokes = false;
+}
+function openSignatureModal() {
+  signatureMsg.classList.remove('show', 'error');
+  signaturePlacement.value = stampPlacementValue;
+  signatureModal.style.display = 'flex';
+}
+function closeSignatureModal() { signatureModal.style.display = 'none'; }
+openSignatureBtn.addEventListener('click', openSignatureModal);
+signatureCancelBtn.addEventListener('click', closeSignatureModal);
+signatureClearBtn.addEventListener('click', clearSignatureCanvas);
+signatureModal.addEventListener('click', (e) => { if (e.target === signatureModal) closeSignatureModal(); });
+
+signatureConfirmBtn.addEventListener('click', async () => {
+  if (!sigHasStrokes) {
+    signatureMsg.textContent = t('signatureHint');
+    signatureMsg.classList.add('show', 'error');
+    return;
+  }
+  signatureConfirmBtn.disabled = true;
+  try {
+    const blob = await new Promise((resolve) => signatureCanvas.toBlob(resolve, 'image/png'));
+    const form = new FormData();
+    form.append('image', blob, 'signature.png');
+    const res = await fetch('/api/upload-watermark-image', { method: 'POST', body: form });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '上傳簽名失敗');
+    stampImageId = data.id;
+    stampPlacementValue = signaturePlacement.value;
+    signatureStatusHint.textContent = `${t('signatureBtn')} ✓`;
+    closeSignatureModal();
+  } catch (err) {
+    signatureMsg.textContent = err.message;
+    signatureMsg.classList.add('show', 'error');
+  } finally {
+    signatureConfirmBtn.disabled = false;
+  }
+});
+
+// ---- PDF 密碼解鎖 ----
+function promptForPdfPassword(data) {
+  return new Promise((resolve) => {
+    pdfPasswordMsg.classList.remove('show', 'error');
+    pdfPasswordInput.value = '';
+    passwordModal.style.display = 'flex';
+    pdfPasswordInput.focus();
+
+    function cleanup() {
+      passwordModal.style.display = 'none';
+      pdfPasswordSubmitBtn.removeEventListener('click', onSubmit);
+      pdfPasswordCancelBtn.removeEventListener('click', onCancel);
+      pdfPasswordInput.removeEventListener('keydown', onKeydown);
+    }
+    function onCancel() { cleanup(); resolve(null); }
+    async function onSubmit() {
+      const password = pdfPasswordInput.value;
+      if (!password) return;
+      pdfPasswordSubmitBtn.disabled = true;
+      try {
+        const res = await fetch('/api/decrypt-pdf', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: data.id, password }),
+        });
+        const result = await res.json();
+        if (!res.ok) throw new Error(result.error || '解鎖失敗');
+        cleanup();
+        resolve(result);
+      } catch (err) {
+        pdfPasswordMsg.textContent = err.message;
+        pdfPasswordMsg.classList.add('show', 'error');
+      } finally {
+        pdfPasswordSubmitBtn.disabled = false;
+      }
+    }
+    function onKeydown(e) { if (e.key === 'Enter') onSubmit(); }
+    pdfPasswordSubmitBtn.addEventListener('click', onSubmit);
+    pdfPasswordCancelBtn.addEventListener('click', onCancel);
+    pdfPasswordInput.addEventListener('keydown', onKeydown);
+  });
+}
+
+// ---- 鍵盤快速鍵(Ctrl/Cmd+P 送出列印、Esc 關閉彈窗/清除檔案) ----
+function isTypingTarget(el) {
+  if (!el) return false;
+  if (el.tagName === 'TEXTAREA') return true;
+  if (el === printerSearch || el === pageRange) return true;
+  if (el.tagName === 'INPUT' && el.type !== 'checkbox' && el.type !== 'radio') return true;
+  return false;
+}
+function closeTopmostModal() {
+  if (signatureModal.style.display !== 'none') { closeSignatureModal(); return true; }
+  if (previewModal.style.display !== 'none') { closePreviewModal(); return true; }
+  if (feedbackModal.style.display !== 'none') { closeFeedbackModal(); return true; }
+  if (qrPopover.style.display !== 'none') { qrPopover.style.display = 'none'; return true; }
+  return false;
+}
+document.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p') {
+    e.preventDefault();
+    if (optionsPanel.style.display !== 'none' && !printBtn.disabled) printBtn.click();
+    return;
+  }
+  if (e.key === 'Escape') {
+    if (closeTopmostModal()) return;
+    if (isTypingTarget(e.target)) return;
+    if (state.fileId) clearFile.click();
+  }
+});
+
 loadPrinters();
 loadJobs();
+loadScheduled();

@@ -16,6 +16,7 @@ export async function renderPageGrid(pdfBytes, container, { onChange } = {}) {
   const selected = new Set(order);
   let reordered = false;
   let dragFromIndex = null;
+  const rotations = new Map(); // pageNum -> 0/90/180/270
 
   function isCustomOrder() {
     if (!reordered) return false;
@@ -71,9 +72,25 @@ export async function renderPageGrid(pdfBytes, container, { onChange } = {}) {
     check.className = 'pg-check';
     check.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
 
+    const rotateBtn = document.createElement('button');
+    rotateBtn.type = 'button';
+    rotateBtn.className = 'pg-rotate';
+    rotateBtn.title = '旋轉此頁';
+    rotateBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>';
+    rotateBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const pageNum = Number(card.dataset.page);
+      const next = ((rotations.get(pageNum) || 0) + 90) % 360;
+      if (next === 0) rotations.delete(pageNum);
+      else rotations.set(pageNum, next);
+      canvas.style.transform = next ? `rotate(${next}deg)` : '';
+      emitChange();
+    });
+
     card.appendChild(canvas);
     card.appendChild(badge);
     card.appendChild(check);
+    card.appendChild(rotateBtn);
     container.appendChild(card);
     cards.set(i, card);
 
@@ -116,6 +133,11 @@ export async function renderPageGrid(pdfBytes, container, { onChange } = {}) {
       selected.clear();
       order.forEach((p) => selected.add(p));
       reordered = false;
+      rotations.forEach((_, pageNum) => {
+        const card = cards.get(pageNum);
+        if (card) card.querySelector('canvas').style.transform = '';
+      });
+      rotations.clear();
       renderOrder();
       emitChange();
     },
@@ -123,6 +145,9 @@ export async function renderPageGrid(pdfBytes, container, { onChange } = {}) {
       order.forEach((p) => selected.add(p));
       renderOrder();
       emitChange();
+    },
+    getRotations() {
+      return Object.fromEntries(rotations);
     },
   };
 }

@@ -5,6 +5,8 @@ converted/*
 print-ready/*
 data/jobs.json
 data/printer-stats.json
+data/feedback.json
+data/scheduled-jobs.json
 .lo-profile/
 !uploads/.gitkeep
 !converted/.gitkeep

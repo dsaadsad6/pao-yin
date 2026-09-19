@@ -3,10 +3,14 @@ require('dotenv').config();
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const { execFile } = require('child_process');
 const express = require('express');
 const session = require('express-session');
 const multer = require('multer');
 const rateLimit = require('express-rate-limit');
+const QRCode = require('qrcode');
+const geoip = require('geoip-lite');
+const cron = require('node-cron');
 
 const { listPrinters } = require('./lib/printers');
 const {
@@ -33,20 +37,39 @@ function getFileTypeFromFile() {
 }
 
 const PORT = process.env.PORT || 3000;
-const ACCESS_USERNAME = process.env.ACCESS_USERNAME || 'admin';
-const ACCESS_PASSWORD = process.env.ACCESS_PASSWORD || 'changeme';
 const SESSION_SECRET = process.env.SESSION_SECRET || 'dev-secret-change-me';
 const SUMATRA_PATH = process.env.SUMATRA_PATH || 'SumatraPDF.exe';
 const SOFFICE_PATH = process.env.SOFFICE_PATH || 'soffice.exe';
 const EDGE_PATH = process.env.EDGE_PATH || 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
 const PRINTER_STATS_FILE = path.join(__dirname, 'data', 'printer-stats.json');
 const MAINTENANCE_THRESHOLD = parseInt(process.env.MAINTENANCE_THRESHOLD, 10) || 1000;
+const PUBLIC_URL = process.env.PUBLIC_URL || '';
+const QPDF_PATH = process.env.QPDF_PATH || 'qpdf.exe';
+
+// 多組帳號:ACCOUNTS="帳號:密碼,帳號:密碼",沒設定就 fallback 回舊版單一 ACCESS_USERNAME/ACCESS_PASSWORD
+function parseAccounts() {
+  const raw = process.env.ACCOUNTS;
+  if (raw && raw.trim()) {
+    const accounts = raw.split(',').map((s) => s.trim()).filter(Boolean).map((pair) => {
+      const idx = pair.indexOf(':');
+      return { username: pair.slice(0, idx), password: pair.slice(idx + 1) };
+    }).filter((a) => a.username && a.password);
+    if (accounts.length > 0) return accounts;
+  }
+  return [{
+    username: process.env.ACCESS_USERNAME || 'admin',
+    password: process.env.ACCESS_PASSWORD || 'changeme',
+  }];
+}
+const ACCOUNTS = parseAccounts();
 
 const UPLOAD_DIR = path.join(__dirname, 'uploads');
 const CONVERTED_DIR = path.join(__dirname, 'converted');
 const PRINT_READY_DIR = path.join(__dirname, 'print-ready');
 const DATA_DIR = path.join(__dirname, 'data');
 const JOBS_FILE = path.join(DATA_DIR, 'jobs.json');
+const FEEDBACK_FILE = path.join(DATA_DIR, 'feedback.json');
+const SCHEDULED_FILE = path.join(DATA_DIR, 'scheduled-jobs.json');
 
 const LO_PROFILE_DIR = path.join(__dirname, '.lo-profile');
 
@@ -55,6 +78,34 @@ for (const dir of [UPLOAD_DIR, CONVERTED_DIR, PRINT_READY_DIR, DATA_DIR, LO_PROF
 }
 if (!fs.existsSync(JOBS_FILE)) fs.writeFileSync(JOBS_FILE, '[]');
 if (!fs.existsSync(PRINTER_STATS_FILE)) fs.writeFileSync(PRINTER_STATS_FILE, '{}');
+if (!fs.existsSync(FEEDBACK_FILE)) fs.writeFileSync(FEEDBACK_FILE, '[]');
+if (!fs.existsSync(SCHEDULED_FILE)) fs.writeFileSync(SCHEDULED_FILE, '[]');
+
+// ---- 排程列印 ----
+function readScheduled() {
+  try {
+    return JSON.parse(fs.readFileSync(SCHEDULED_FILE, 'utf-8'));
+  } catch {
+    return [];
+  }
+}
+function writeScheduled(list) {
+  fs.writeFileSync(SCHEDULED_FILE, JSON.stringify(list, null, 2));
+}
+
+// ---- 意見回饋 ----
+function readFeedback() {
+  try {
+    return JSON.parse(fs.readFileSync(FEEDBACK_FILE, 'utf-8'));
+  } catch {
+    return [];
+  }
+}
+function addFeedback(entry) {
+  const list = readFeedback();
+  list.push(entry);
+  fs.writeFileSync(FEEDBACK_FILE, JSON.stringify(list.slice(-500), null, 2));
+}
 
 // ---- 印表機維護提醒(累積列印頁數) ----
 function readPrinterStats() {
@@ -125,6 +176,25 @@ const upload = multer({
   },
 });
 
+// ---- 浮水印/簽名圖片上傳(僅存本機,不轉檔) ----
+const watermarkImageUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, UPLOAD_DIR),
+    filename: (req, file, cb) => {
+      const id = crypto.randomUUID();
+      const ext = path.extname(file.originalname).toLowerCase();
+      cb(null, `${id}${ext}`);
+    },
+  }),
+  limits: { fileSize: 2 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    file.originalname = Buffer.from(file.originalname, 'latin1').toString('utf8');
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (ext !== '.png' && ext !== '.jpg' && ext !== '.jpeg') return cb(new Error('僅支援 PNG / JPG 圖片'));
+    cb(null, true);
+  },
+});
+
 // ---- jobs 簡易儲存 ----
 function readJobs() {
   try {
@@ -184,8 +254,10 @@ const loginLimiter = rateLimit({
 
 app.post('/api/login', loginLimiter, (req, res) => {
   const { username, password } = req.body || {};
-  if (username === ACCESS_USERNAME && password === ACCESS_PASSWORD) {
+  const matched = ACCOUNTS.find((a) => a.username === username && a.password === password);
+  if (matched) {
     req.session.authed = true;
+    req.session.username = matched.username;
     return res.json({ ok: true });
   }
   return res.status(401).json({ error: '帳號或密碼錯誤' });
@@ -270,6 +342,17 @@ app.post('/api/upload', (req, res) => {
       if (ext === '.pdf') {
         pdfPath = req.file.path;
         kind = 'pdf';
+
+        // 先試著讀頁數,如果是加密過的 PDF,pdf-lib 會直接丟出帶有 "encrypted" 字樣的錯誤
+        try {
+          const pageCount = await getPdfPageCount(pdfPath);
+          fileRegistry.set(id, { pdfPath, pageCount, originalName: req.file.originalname });
+          return res.json({ id, originalName: req.file.originalname, kind, pageCount });
+        } catch (e) {
+          if (!/encrypt/i.test(e.message || '')) throw e;
+          fileRegistry.set(id, { pdfPath, pageCount: null, originalName: req.file.originalname, kind: 'pdf', encrypted: true });
+          return res.json({ id, originalName: req.file.originalname, kind, needsPassword: true });
+        }
       } else if (ext === '.jpg' || ext === '.jpeg' || ext === '.png') {
         pdfPath = path.join(CONVERTED_DIR, `${id}.pdf`);
         await imageToPdf(req.file.path, pdfPath, autoFix);
@@ -295,6 +378,59 @@ app.post('/api/upload', (req, res) => {
       res.status(500).json({ error: `處理檔案失敗: ${e.message}` });
     }
   });
+});
+
+app.post('/api/upload-watermark-image', (req, res) => {
+  watermarkImageUpload.single('image')(req, res, async (err) => {
+    if (err) return res.status(400).json({ error: err.message });
+    if (!req.file) return res.status(400).json({ error: '沒有收到圖片' });
+
+    const ext = path.extname(req.file.originalname).toLowerCase();
+    try {
+      const signatureOk = await validateFileSignature(req.file.path, ext);
+      if (!signatureOk) {
+        await fs.promises.unlink(req.file.path).catch(() => {});
+        return res.status(400).json({ error: '圖片內容跟副檔名不符,可能是偽裝過的檔案,已拒絕' });
+      }
+      const id = path.basename(req.file.filename, ext);
+      fileRegistry.set(id, {
+        pdfPath: null,
+        imagePath: req.file.path,
+        pageCount: 0,
+        originalName: req.file.originalname,
+        kind: 'image-asset',
+      });
+      res.json({ id });
+    } catch (e) {
+      res.status(500).json({ error: `圖片處理失敗: ${e.message}` });
+    }
+  });
+});
+
+app.post('/api/decrypt-pdf', (req, res) => {
+  const { id, password } = req.body || {};
+  const entry = fileRegistry.get(id);
+  if (!entry || !entry.encrypted) return res.status(404).json({ error: '找不到需要解鎖的檔案,請重新上傳' });
+  if (!password) return res.status(400).json({ error: '請輸入密碼' });
+
+  const outPath = path.join(CONVERTED_DIR, `${crypto.randomUUID()}.pdf`);
+  execFile(
+    QPDF_PATH,
+    [`--password=${password}`, '--decrypt', entry.pdfPath, outPath],
+    { windowsHide: true, timeout: 30000 },
+    async (err) => {
+      if (err) return res.status(400).json({ error: '密碼錯誤,或這份 PDF 用了 qpdf 不支援的加密方式' });
+      try {
+        const pageCount = await getPdfPageCount(outPath);
+        entry.pdfPath = outPath;
+        entry.pageCount = pageCount;
+        entry.encrypted = false;
+        res.json({ id, originalName: entry.originalName, kind: 'pdf', pageCount });
+      } catch (e) {
+        res.status(500).json({ error: `解鎖後讀取失敗: ${e.message}` });
+      }
+    }
+  );
 });
 
 app.post('/api/paste-text', async (req, res) => {
@@ -375,87 +511,103 @@ app.post('/api/scan', async (req, res) => {
   }
 });
 
-app.post('/api/print', async (req, res) => {
+function resolveWatermarkImagePath(watermarkImageId) {
+  if (!watermarkImageId) return null;
+  const imgEntry = fileRegistry.get(watermarkImageId);
+  if (!imgEntry || imgEntry.kind !== 'image-asset') return null;
+  return imgEntry.imagePath;
+}
+
+// 所有列印路徑(網頁即時列印/批次列印/排程列印)共用的核心邏輯。
+// spec 需要的欄位已經是「完全解析好」的資料(pdfPath 是實際檔案路徑、watermarkImagePath 已解析成真實路徑等),
+// 這樣排程列印在真正執行的當下就算 fileRegistry 已經變動也不受影響。
+async function executePrintJob(spec) {
   const {
-    id, printerName, pageRange, color, duplex, copies,
+    pdfPath, pageCount, originalName, printerName, pageRange, color, duplex, copies,
     watermarkText, headerText, footerText, pageNumbers, pageOrder,
-    layoutMode, posterCols, posterRows,
-  } = req.body || {};
-  const entry = fileRegistry.get(id);
-  if (!entry) return res.status(404).json({ error: '找不到檔案,請重新上傳' });
-  if (!printerName) return res.status(400).json({ error: '請選擇印表機' });
+    layoutMode, posterCols, posterRows, pageScale, pageRotations,
+    watermarkImagePath, watermarkColor, watermarkOpacity,
+    stampImagePath, stampPlacement, printedBy, batchId,
+  } = spec;
 
   const hasCustomOrder = Array.isArray(pageOrder) && pageOrder.length > 0;
   const hasLayout = layoutMode && layoutMode !== 'none';
-  if (hasCustomOrder) {
-    const valid = pageOrder.every((n) => Number.isInteger(n) && n >= 1 && n <= entry.pageCount);
-    if (!valid) return res.status(400).json({ error: '自訂排序的頁碼超出範圍' });
-  }
-
-  // 版面模式(N-up/小冊子/海報)一定要先在伺服器端把選取的頁面組成一份新 PDF,
-  // 所以只要用了版面模式,就一律走自訂頁序這條路,不再用 SumatraPDF 的頁碼範圍字串
   const bypassRange = hasCustomOrder || hasLayout;
   const effectivePageOrder = hasCustomOrder
     ? pageOrder
-    : (hasLayout ? Array.from({ length: entry.pageCount }, (_, i) => i + 1) : null);
+    : (hasLayout ? Array.from({ length: pageCount }, (_, i) => i + 1) : null);
 
-  let normalizedRange = null;
-  if (!bypassRange) {
-    try {
-      normalizedRange = parsePageRange(pageRange, entry.pageCount);
-    } catch (e) {
-      return res.status(400).json({ error: e.message });
-    }
-  }
-
-  const layoutLabel = { nup2: '2-up', nup4: '4-up', booklet: '小冊子', poster: '海報' }[layoutMode];
   const job = {
     id: crypto.randomUUID(),
-    fileId: id,
-    originalName: entry.originalName,
+    originalName,
     printerName,
-    pageRange: hasCustomOrder
-      ? `自訂順序(${pageOrder.length} 頁)`
-      : (normalizedRange || `1-${entry.pageCount}`),
-    layout: layoutLabel || null,
+    pageRange: hasCustomOrder ? `自訂順序(${pageOrder.length} 頁)` : (pageRange && String(pageRange).trim() ? String(pageRange).trim() : `1-${pageCount}`),
+    layout: { nup2: '2-up', nup4: '4-up', booklet: '小冊子', poster: '海報' }[layoutMode] || null,
     color: color === 'color' ? 'color' : color === 'gray' ? 'gray' : 'mono',
     duplex: duplex || 'simplex',
     copies: copies || 1,
     status: 'printing',
+    printedBy: printedBy || null,
+    batchId: batchId || null,
+    attempts: 0,
     createdAt: new Date().toISOString(),
   };
   addJob(job);
 
-  try {
-    const printPdfPath = await prepareForPrint(
-      entry.pdfPath,
-      {
-        watermarkText, headerText, footerText, pageNumbers,
-        pageOrder: effectivePageOrder,
-        layoutMode, posterCols, posterRows,
-      },
-      PRINT_READY_DIR
-    );
-    await printPdf({
-      sumatraPath: SUMATRA_PATH,
-      printerName,
-      pdfPath: printPdfPath,
-      pageRange: normalizedRange,
-      color,
-      duplex,
-      copies,
-    });
-    job.status = 'done';
+  // 保守版重試:只在「指令根本沒送出去」(例如 SumatraPDF.exe 執行檔本身叫不起來)時才重試,
+  // 已經呼叫過 SumatraPDF、真的跟印表機互動過的失敗一律不重試,避免物理重複出紙
+  const MAX_SUBMIT_RETRIES = 2;
+  let lastErr = null;
+  for (let attempt = 0; attempt <= MAX_SUBMIT_RETRIES; attempt++) {
+    job.attempts = attempt + 1;
     try {
-      const finalPageCount = await getPdfPageCount(printPdfPath);
-      addPrinterPages(printerName, finalPageCount * (parseInt(copies, 10) || 1));
-    } catch {
-      // 統計失敗不影響列印結果本身
+      const normalizedRange = bypassRange ? null : parsePageRange(pageRange, pageCount);
+      if (!hasCustomOrder && normalizedRange) job.pageRange = normalizedRange;
+
+      const printPdfPath = await prepareForPrint(
+        pdfPath,
+        {
+          watermarkText, headerText, footerText, pageNumbers,
+          pageOrder: effectivePageOrder,
+          layoutMode, posterCols, posterRows,
+          pageScale, pageRotations,
+          watermarkImagePath, watermarkColor, watermarkOpacity,
+          stampImagePath, stampPlacement,
+        },
+        PRINT_READY_DIR
+      );
+      await printPdf({
+        sumatraPath: SUMATRA_PATH,
+        printerName,
+        pdfPath: printPdfPath,
+        pageRange: normalizedRange,
+        color,
+        duplex,
+        copies,
+      });
+      job.status = 'done';
+      try {
+        const finalPageCount = await getPdfPageCount(printPdfPath);
+        addPrinterPages(printerName, finalPageCount * (parseInt(copies, 10) || 1));
+      } catch {
+        // 統計失敗不影響列印結果本身
+      }
+      lastErr = null;
+      break;
+    } catch (e) {
+      lastErr = e;
+      const isSpawnFailure = /ENOENT/.test(e.message || '');
+      if (!isSpawnFailure || attempt === MAX_SUBMIT_RETRIES) break;
+      await new Promise((resolve) => setTimeout(resolve, 2000));
     }
-  } catch (e) {
-    console.error('列印失敗:', e);
+  }
+
+  if (lastErr) {
+    console.error('列印失敗:', lastErr);
     job.status = 'error';
-    job.error = '印表機沒有回應或列印失敗,請確認印表機是否連線、紙張/墨水是否足夠,再重試一次';
+    job.error = /頁碼格式錯誤|頁碼超出範圍/.test(lastErr.message || '')
+      ? lastErr.message
+      : '印表機沒有回應或列印失敗,請確認印表機是否連線、紙張/墨水是否足夠,再重試一次';
   }
 
   const jobs = readJobs();
@@ -463,8 +615,179 @@ app.post('/api/print', async (req, res) => {
   if (idx >= 0) jobs[idx] = job;
   writeJobs(jobs);
 
+  return job;
+}
+
+app.post('/api/print', async (req, res) => {
+  const {
+    id, printerName, pageRange, color, duplex, copies,
+    watermarkText, headerText, footerText, pageNumbers, pageOrder,
+    layoutMode, posterCols, posterRows,
+    pageScale, pageRotations, watermarkImageId, watermarkColor, watermarkOpacity,
+    stampImageId, stampPlacement,
+  } = req.body || {};
+  const entry = fileRegistry.get(id);
+  if (!entry) return res.status(404).json({ error: '找不到檔案,請重新上傳' });
+  if (!printerName) return res.status(400).json({ error: '請選擇印表機' });
+
+  if (Array.isArray(pageOrder) && pageOrder.length > 0) {
+    const valid = pageOrder.every((n) => Number.isInteger(n) && n >= 1 && n <= entry.pageCount);
+    if (!valid) return res.status(400).json({ error: '自訂排序的頁碼超出範圍' });
+  }
+
+  const job = await executePrintJob({
+    pdfPath: entry.pdfPath, pageCount: entry.pageCount, originalName: entry.originalName,
+    printerName, pageRange, color, duplex, copies,
+    watermarkText, headerText, footerText, pageNumbers, pageOrder,
+    layoutMode, posterCols, posterRows, pageScale, pageRotations,
+    watermarkImagePath: resolveWatermarkImagePath(watermarkImageId),
+    watermarkColor, watermarkOpacity,
+    stampImagePath: resolveWatermarkImagePath(stampImageId),
+    stampPlacement,
+    printedBy: (req.session && req.session.username) || null,
+  });
+
   if (job.status === 'error') return res.status(500).json({ error: job.error, job });
   res.json({ ok: true, job });
+});
+
+app.post('/api/print-batch', async (req, res) => {
+  const {
+    items, printerName, color, duplex, copies,
+    watermarkText, headerText, footerText, pageNumbers,
+  } = req.body || {};
+  if (!Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ error: '沒有要批次列印的檔案' });
+  }
+  if (!printerName) return res.status(400).json({ error: '請選擇印表機' });
+
+  const entries = items.map((item) => ({ item, entry: fileRegistry.get(item.id) }));
+  const missing = entries.find((e) => !e.entry);
+  if (missing) return res.status(404).json({ error: '有檔案找不到,請重新上傳' });
+
+  const batchId = crypto.randomUUID();
+  const printedBy = (req.session && req.session.username) || null;
+  const jobs = [];
+  // 依序而非平行送印,避免多個 SumatraPDF 同時搶同一台印表機
+  for (const { item, entry } of entries) {
+    const job = await executePrintJob({
+      pdfPath: entry.pdfPath, pageCount: entry.pageCount, originalName: entry.originalName,
+      printerName, pageRange: item.pageRange, color, duplex, copies,
+      watermarkText, headerText, footerText, pageNumbers,
+      printedBy, batchId,
+    });
+    jobs.push(job);
+  }
+
+  const hasError = jobs.some((j) => j.status === 'error');
+  res.status(hasError ? 207 : 200).json({ ok: !hasError, jobs });
+});
+
+app.post('/api/schedule-print', (req, res) => {
+  const {
+    id, scheduledAt, printerName, pageRange, color, duplex, copies,
+    watermarkText, headerText, footerText, pageNumbers, pageOrder,
+    layoutMode, posterCols, posterRows, pageScale, pageRotations,
+    watermarkImageId, watermarkColor, watermarkOpacity,
+  } = req.body || {};
+  const entry = fileRegistry.get(id);
+  if (!entry) return res.status(404).json({ error: '找不到檔案,請重新上傳' });
+  if (!printerName) return res.status(400).json({ error: '請選擇印表機' });
+
+  const when = new Date(scheduledAt);
+  if (!scheduledAt || Number.isNaN(when.getTime()) || when.getTime() <= Date.now()) {
+    return res.status(400).json({ error: '請選擇一個未來的時間' });
+  }
+  if (Array.isArray(pageOrder) && pageOrder.length > 0) {
+    const valid = pageOrder.every((n) => Number.isInteger(n) && n >= 1 && n <= entry.pageCount);
+    if (!valid) return res.status(400).json({ error: '自訂排序的頁碼超出範圍' });
+  }
+
+  const scheduled = {
+    id: crypto.randomUUID(),
+    scheduledAt: when.toISOString(),
+    status: 'pending',
+    createdAt: new Date().toISOString(),
+    printedBy: (req.session && req.session.username) || null,
+    originalName: entry.originalName,
+    printerName,
+    spec: {
+      pdfPath: entry.pdfPath, pageCount: entry.pageCount, originalName: entry.originalName,
+      printerName, pageRange, color, duplex, copies,
+      watermarkText, headerText, footerText, pageNumbers, pageOrder,
+      layoutMode, posterCols, posterRows, pageScale, pageRotations,
+      watermarkImagePath: resolveWatermarkImagePath(watermarkImageId),
+      watermarkColor, watermarkOpacity,
+    },
+  };
+  const list = readScheduled();
+  list.push(scheduled);
+  writeScheduled(list);
+
+  res.json({ ok: true, scheduled: { id: scheduled.id, scheduledAt: scheduled.scheduledAt, originalName: scheduled.originalName, printerName } });
+});
+
+app.get('/api/scheduled-jobs', (req, res) => {
+  const list = readScheduled()
+    .filter((s) => s.status === 'pending')
+    .map((s) => ({ id: s.id, scheduledAt: s.scheduledAt, originalName: s.originalName, printerName: s.printerName, printedBy: s.printedBy }))
+    .sort((a, b) => new Date(a.scheduledAt) - new Date(b.scheduledAt));
+  res.json({ scheduled: list });
+});
+
+app.delete('/api/schedule-print/:id', (req, res) => {
+  const list = readScheduled();
+  const idx = list.findIndex((s) => s.id === req.params.id && s.status === 'pending');
+  if (idx < 0) return res.status(404).json({ error: '找不到這筆排程,或已經執行過了' });
+  list[idx].status = 'cancelled';
+  writeScheduled(list);
+  res.json({ ok: true });
+});
+
+const PREVIEW_TTL_MS = 10 * 60 * 1000;
+
+app.post('/api/print-preview', async (req, res) => {
+  const {
+    id, pageOrder, layoutMode, posterCols, posterRows,
+    watermarkText, headerText, footerText, pageNumbers,
+    pageScale, pageRotations, watermarkImageId, watermarkColor, watermarkOpacity,
+    stampImageId, stampPlacement,
+  } = req.body || {};
+  const entry = fileRegistry.get(id);
+  if (!entry) return res.status(404).json({ error: '找不到檔案,請重新上傳' });
+
+  const hasCustomOrder = Array.isArray(pageOrder) && pageOrder.length > 0;
+  const hasLayout = layoutMode && layoutMode !== 'none';
+  const effectivePageOrder = hasCustomOrder
+    ? pageOrder
+    : (hasLayout ? Array.from({ length: entry.pageCount }, (_, i) => i + 1) : null);
+
+  try {
+    const previewPath = await prepareForPrint(
+      entry.pdfPath,
+      {
+        watermarkText, headerText, footerText, pageNumbers,
+        pageOrder: effectivePageOrder,
+        layoutMode, posterCols, posterRows,
+        pageScale, pageRotations,
+        watermarkImagePath: resolveWatermarkImagePath(watermarkImageId),
+        watermarkColor, watermarkOpacity,
+        stampImagePath: resolveWatermarkImagePath(stampImageId),
+        stampPlacement,
+      },
+      PRINT_READY_DIR
+    );
+    const previewId = crypto.randomUUID();
+    const pageCount = await getPdfPageCount(previewPath);
+    fileRegistry.set(previewId, { pdfPath: previewPath, pageCount, originalName: entry.originalName, kind: 'preview' });
+    setTimeout(() => {
+      fileRegistry.delete(previewId);
+      if (previewPath !== entry.pdfPath) fs.promises.unlink(previewPath).catch(() => {});
+    }, PREVIEW_TTL_MS);
+    res.json({ id: previewId, pageCount });
+  } catch (e) {
+    res.status(500).json({ error: `產生預覽失敗: ${e.message}` });
+  }
 });
 
 app.get('/api/jobs', (req, res) => {
@@ -472,10 +795,76 @@ app.get('/api/jobs', (req, res) => {
   res.json({ jobs });
 });
 
+app.get('/api/qrcode', async (req, res) => {
+  if (!PUBLIC_URL) return res.status(404).json({ error: '尚未設定 PUBLIC_URL' });
+  try {
+    const buffer = await QRCode.toBuffer(PUBLIC_URL, { width: 320, margin: 1 });
+    res.type('png').send(buffer);
+  } catch (e) {
+    res.status(500).json({ error: `產生 QR Code 失敗: ${e.message}` });
+  }
+});
+
+app.post('/api/feedback', (req, res) => {
+  const { message } = req.body || {};
+  if (!message || !message.trim()) return res.status(400).json({ error: '請輸入回饋內容' });
+  if (message.length > 2000) return res.status(400).json({ error: '內容過長' });
+
+  const ip = (req.ip || req.headers['cf-connecting-ip'] || '').replace(/^::ffff:/, '');
+  // 用本機內建的 geoip-lite 資料庫查地理位置,不把使用者 IP 送到任何外部第三方服務
+  let location = null;
+  try {
+    const geo = geoip.lookup(ip);
+    if (geo) location = `${geo.country || ''} ${geo.region || ''} ${geo.city || ''}`.trim();
+  } catch {
+    // 查不到地理位置不影響回饋本身的儲存
+  }
+
+  addFeedback({
+    id: crypto.randomUUID(),
+    message: message.trim(),
+    username: (req.session && req.session.username) || null,
+    ip,
+    location,
+    createdAt: new Date().toISOString(),
+  });
+
+  res.json({ ok: true });
+});
+
 // 統一錯誤處理,避免把內部錯誤堆疊洩漏給外部使用者
 app.use((err, req, res, next) => {
   console.error(err);
   res.status(err.status || 400).json({ error: '請求處理失敗,請確認輸入內容' });
+});
+
+// 每分鐘檢查一次有沒有時間到的排程列印工作
+let scheduledCronRunning = false;
+cron.schedule('* * * * *', async () => {
+  if (scheduledCronRunning) return;
+  scheduledCronRunning = true;
+  try {
+    const list = readScheduled();
+    const due = list.filter((s) => s.status === 'pending' && new Date(s.scheduledAt).getTime() <= Date.now());
+    for (const s of due) {
+      s.status = 'running';
+      writeScheduled(list);
+      try {
+        const job = await executePrintJob({ ...s.spec, printedBy: s.printedBy });
+        s.status = job.status === 'done' ? 'done' : 'error';
+        s.jobId = job.id;
+        if (job.status === 'error') s.error = job.error;
+      } catch (e) {
+        s.status = 'error';
+        s.error = e.message;
+      }
+      writeScheduled(list);
+    }
+  } catch (e) {
+    console.error('排程列印檢查失敗:', e);
+  } finally {
+    scheduledCronRunning = false;
+  }
 });
 
 app.listen(PORT, () => {
