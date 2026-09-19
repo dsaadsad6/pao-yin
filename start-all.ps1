@@ -60,16 +60,45 @@ $newContent = $content -replace 'ORIGIN_URL = ".*"', "ORIGIN_URL = `"$tunnelUrl`
 Set-Content -Path $wranglerToml -Value $newContent -Encoding utf8 -NoNewline
 Log "已更新 wrangler.toml"
 
-# 4. 重新部署 Worker
+# 4. 重新部署 Worker(非互動 + 逾時保護:stdin 導向空檔,任何互動提示會立刻 EOF 失敗而不是永遠卡住)
 Log "開始部署 Worker"
-Push-Location "$root\cf-proxy-worker"
+$deployOut = "$logDir\deploy_$stamp.log"
+$deployErr = "$logDir\deploy_$stamp.log.err"
+$nullIn = "$logDir\.empty-stdin"
+Set-Content -Path $nullIn -Value "" -NoNewline
+$deployOk = $false
 try {
-    $deployOutput = & npx wrangler deploy 2>&1 | Out-String
-    Log "部署輸出: $deployOutput"
+    $p = Start-Process -FilePath "cmd.exe" `
+        -ArgumentList "/c", "npx --yes wrangler deploy" `
+        -WorkingDirectory "$root\cf-proxy-worker" `
+        -RedirectStandardOutput $deployOut -RedirectStandardError $deployErr `
+        -RedirectStandardInput $nullIn -WindowStyle Hidden -PassThru
+    if ($p.WaitForExit(180000)) {
+        $o = ""
+        if (Test-Path $deployOut) { $o += Get-Content $deployOut -Raw -ErrorAction SilentlyContinue }
+        if (Test-Path $deployErr) { $o += Get-Content $deployErr -Raw -ErrorAction SilentlyContinue }
+        Log "部署結束(exit=$($p.ExitCode)): $o"
+        if ($p.ExitCode -eq 0) { $deployOk = $true } else { Log "❌ 部署回傳非零 exit code" }
+    } else {
+        Log "❌ 部署超過 180 秒未結束,強制終止(可能是 npx/wrangler 在等互動輸入或登入)"
+        try { $p.Kill() } catch {}
+    }
 } catch {
     Log "❌ 部署失敗: $($_.Exception.Message)"
-} finally {
-    Pop-Location
+}
+
+# 5. 驗證固定網域真的通了(部署成功也可能因為快取/綁定問題還是連到舊 origin)
+if ($deployOk) {
+    $publicOk = $false
+    for ($i = 0; $i -lt 6; $i++) {
+        Start-Sleep -Seconds 5
+        try {
+            $r = Invoke-WebRequest -Uri "https://print.xiaom67.dpdns.org/login.html" -UseBasicParsing -TimeoutSec 10
+            if ($r.StatusCode -eq 200) { $publicOk = $true; break }
+        } catch {}
+    }
+    if ($publicOk) { Log "✅ 外網 https://print.xiaom67.dpdns.org 驗證通過" }
+    else { Log "❌ 外網驗證失敗,Worker 可能還連到舊的 Tunnel 網址,請手動重新部署" }
 }
 
 Log "=== 啟動流程結束 ==="
