@@ -126,6 +126,7 @@ const posterDropdown = createCustomSelect(posterSize);
 const jobStatusDropdown = createCustomSelect(jobStatusFilter);
 const langDropdown = createCustomSelect(langSelect);
 const watermarkPresetDropdown = createCustomSelect(watermarkPreset);
+const signaturePlacementDropdown = createCustomSelect(signaturePlacement);
 
 document.getElementById('logoutBtn').addEventListener('click', async (e) => {
   e.preventDefault();
@@ -149,6 +150,7 @@ langSelect.addEventListener('change', () => {
   posterDropdown.refresh();
   jobStatusDropdown.refresh();
   watermarkPresetDropdown.refresh();
+  signaturePlacementDropdown.refresh();
   renderJobs();
   themeToggle.title = themeTooltip(currentTheme);
   if (batchModeActive) printBtn.textContent = t('batchSubmitBtn');
@@ -1208,6 +1210,7 @@ function clearSignatureCanvas() {
 function openSignatureModal() {
   signatureMsg.classList.remove('show', 'error');
   signaturePlacement.value = stampPlacementValue;
+  signaturePlacementDropdown.refresh();
   signatureModal.style.display = 'flex';
 }
 function closeSignatureModal() { signatureModal.style.display = 'none'; }

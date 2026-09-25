@@ -73,6 +73,7 @@ try {
         -WorkingDirectory "$root\cf-proxy-worker" `
         -RedirectStandardOutput $deployOut -RedirectStandardError $deployErr `
         -RedirectStandardInput $nullIn -WindowStyle Hidden -PassThru
+    $null = $p.Handle  # PowerShell 5.1 要先取 Handle,結束後 ExitCode 才讀得到(不然永遠是空值,部署成功也被當失敗)
     if ($p.WaitForExit(180000)) {
         $o = ""
         if (Test-Path $deployOut) { $o += Get-Content $deployOut -Raw -ErrorAction SilentlyContinue }
