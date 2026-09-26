@@ -176,6 +176,8 @@ function applyTheme(theme) {
   if (THEME_ATTR[effective]) document.documentElement.dataset.theme = THEME_ATTR[effective];
   else delete document.documentElement.dataset.theme;
   localStorage.setItem('remote-print-theme', theme);
+  const bg = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
+  if (bg) document.querySelectorAll('meta[name="theme-color"]').forEach((m) => m.setAttribute('content', bg));
   themeToggle.title = themeTooltip(theme);
 }
 applyTheme(currentTheme);
